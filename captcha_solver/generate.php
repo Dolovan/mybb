@@ -39,10 +39,19 @@ $max_size = 32;
 $min_angle = -30;
 $max_angle = 30;
 
+// Fonts: MyBB's inc/captcha_fonts when run inside the repository, otherwise a
+// local fonts/ directory (for a standalone copy of this folder).
 $ttf_fonts = [];
-foreach(glob(__DIR__.'/../inc/captcha_fonts/*.ttf') as $file)
+foreach([__DIR__.'/../inc/captcha_fonts', __DIR__.'/fonts'] as $dir)
 {
-	$ttf_fonts[] = realpath($file);
+	foreach(glob($dir.'/*.ttf') as $file)
+	{
+		$ttf_fonts[] = realpath($file);
+	}
+	if(count($ttf_fonts) > 0)
+	{
+		break;
+	}
 }
 if(count($ttf_fonts) == 0 || !function_exists('imagefttext'))
 {
