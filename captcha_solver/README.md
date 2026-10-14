@@ -55,6 +55,13 @@ python3 captcha_solver/solver.py solve --model model.npz image.png
 ```
 
 `solve` affiche le fichier, le texte prédit et une confiance par caractère.
+
+```sh
+# Image montrant chaque étape (captcha, masque, segmentation, glyphes) et la solution
+python3 captcha_solver/solver.py show --model model.npz --out stages.png image.png
+```
+
+![étapes du pipeline](pipeline_example.png)
 Une image récupérée sur un forum réel (`captcha.php?imagehash=…`) se traite
 de la même façon, c'est le même PNG 200×60.
 

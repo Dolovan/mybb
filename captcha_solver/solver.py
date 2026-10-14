@@ -22,6 +22,7 @@ Usage:
   python3 solver.py train --data DIR --model model.npz
   python3 solver.py eval  --data DIR --model model.npz
   python3 solver.py solve --model model.npz IMAGE [IMAGE ...]
+  python3 solver.py show  --model model.npz --out stages.png IMAGE
 
 DIR is a directory produced by generate.php (PNG files + labels.txt).
 """
@@ -215,6 +216,59 @@ class Model:
         return "".join(ch for ch, _ in preds), [c for _, c in preds]
 
 
+def visualise(model, path, out_path, scale=3):
+    """Write a PNG showing every stage of the pipeline for one captcha."""
+    from PIL import ImageDraw
+
+    rgb = load_rgb(path)
+    mask = ink_mask(rgb)
+    cells = segment(rgb)
+    glyphs = np.stack([normalise_glyph(c) for c in cells])
+    preds = model.classify(glyphs)
+    text = "".join(ch for ch, _ in preds)
+
+    # Stage images, all 200x60 so they stack nicely.
+    original = Image.fromarray(rgb)
+    mask_img = Image.fromarray(np.where(mask, 0, 255).astype(np.uint8)).convert("RGB")
+    palette = [(220, 40, 40), (40, 150, 40), (40, 80, 220), (200, 120, 0), (140, 40, 180)]
+    seg = np.full((IMG_H, IMG_W, 3), 255, dtype=np.uint8)
+    for i, cell in enumerate(cells):
+        seg[cell] = palette[i]
+    seg_img = Image.fromarray(seg)
+    draw = ImageDraw.Draw(seg_img)
+    for i in range(1, NCHARS):
+        draw.line([(i * CELL_W, 0), (i * CELL_W, IMG_H - 1)], fill=(200, 200, 200))
+
+    # Normalised glyphs, one per cell, drawn 48x48 under their prediction.
+    glyph_row = Image.new("RGB", (IMG_W, IMG_H), "white")
+    for i, (vec, (ch, conf)) in enumerate(zip(glyphs, preds)):
+        pix = vec[:GLYPH_SIZE * GLYPH_SIZE]
+        pix = pix / (pix.max() or 1.0) * 255
+        g = Image.fromarray(pix.reshape(GLYPH_SIZE, GLYPH_SIZE).astype(np.uint8)).convert("RGB")
+        g = Image.eval(g, lambda v: 255 - v).resize((36, 36), Image.NEAREST)
+        glyph_row.paste(g, (i * CELL_W + 2, 2))
+        ImageDraw.Draw(glyph_row).text((i * CELL_W + 2, 42), f"{ch} {conf:.2f}", fill=palette[i])
+
+    stages = [
+        ("1. captcha", original),
+        ("2. masque min(R,G,B) < %d" % INK_THRESHOLD, mask_img),
+        ("3. segmentation en %d cellules de %d px" % (NCHARS, CELL_W), seg_img),
+        ("4. glyphes normalises %dx%d + k-NN" % (GLYPH_SIZE, GLYPH_SIZE), glyph_row),
+    ]
+    label_h = 14
+    sheet = Image.new("RGB", (IMG_W * scale, len(stages) * (IMG_H * scale + label_h) + 2 * label_h), "white")
+    d = ImageDraw.Draw(sheet)
+    y = 0
+    for title, img in stages:
+        d.text((4, y), title, fill=(0, 0, 0))
+        y += label_h
+        sheet.paste(img.resize((IMG_W * scale, IMG_H * scale), Image.NEAREST), (0, y))
+        y += IMG_H * scale
+    d.text((4, y + 2), f"solution : {text}", fill=(0, 0, 0))
+    sheet.save(out_path)
+    return text
+
+
 def evaluate(data_dir, model_path, k):
     model = Model(model_path, k)
     n_captcha = n_captcha_ok = n_char = n_char_ok = 0
@@ -258,11 +312,20 @@ def main(argv=None):
     p.add_argument("-k", type=int, default=5)
     p.add_argument("images", nargs="+")
 
+    p = sub.add_parser("show", help="write a PNG with every intermediate stage and the solution")
+    p.add_argument("--model", default="model.npz")
+    p.add_argument("-k", type=int, default=3)
+    p.add_argument("--out", required=True)
+    p.add_argument("image")
+
     args = ap.parse_args(argv)
     if args.cmd == "train":
         train(args.data, args.model)
     elif args.cmd == "eval":
         evaluate(args.data, args.model, args.k)
+    elif args.cmd == "show":
+        text = visualise(Model(args.model, args.k), args.image, args.out)
+        print(f"{args.image}\t{text}\t-> {args.out}")
     else:
         model = Model(args.model, args.k)
         for image in args.images:
